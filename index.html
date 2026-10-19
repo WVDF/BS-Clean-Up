@@ -96,8 +96,39 @@ td .mini{display:block;height:8px;background:var(--b1);border-radius:4px}
 tr.sel td .mini{background:var(--accent)}
 .search{font:inherit;font-size:13.5px;color:var(--ink);background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:6px 10px;width:220px;margin-bottom:10px}
 .more{font:inherit;font-size:13px;color:var(--ink);background:none;border:1px solid var(--rule);border-radius:6px;padding:5px 12px;margin-top:10px;cursor:pointer}
+button.printbtn.alt{background:transparent;color:var(--ink);border:1px solid var(--ink)}
+button.printbtn.alt:hover{background:var(--accent);border-color:var(--accent);color:#111222}
+.actions{margin-left:auto;display:flex;gap:8px}
+button.printbtn{font:inherit;font-size:13px;font-weight:600;color:var(--bg);background:var(--ink);border:0;border-radius:8px;padding:7px 14px;cursor:pointer}
+button.printbtn:hover{background:var(--accent);color:#111222}
+.printdate{display:none}
 footer{margin:36px 0 56px;padding-top:16px;border-top:1px solid var(--rule);font-size:12.5px;color:var(--ink2);max-width:80ch}
 footer p{margin:0 0 6px}
+@page{size:A4 landscape;margin:9mm}
+@media print{
+  :root{--page:#fff;--bg:#fff;--band:#F3F2F0;--ink:#111222;--ink2:#5c5b68;--rule:#dcdad6;--b1:#2a2c47;--b2:#c9c7d0;--blue:#0C7993;--accent:#FF5515;color-scheme:light}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  html{zoom:.74}
+  body{background:#fff;font-size:14px}
+  .pair{grid-template-columns:1fr 1fr!important}
+  .facts{grid-template-columns:repeat(6,1fr)!important}
+  .fact .v{font-size:26px!important}
+  .spark{display:block!important}
+  section.pair:first-of-type{break-before:page}
+  #t-acct{break-inside:avoid}
+  .controls,.more,.search,.sub .hint{display:none!important}
+  .wrap{max-width:none;padding:0 4px}
+  header.hero .wrap{padding-top:16px;padding-bottom:20px}
+  .brand img,.brandlogo{margin-bottom:22px!important}
+  header.hero h1{font-size:30px}
+  .card,.fact,.pair>div{break-inside:avoid;page-break-inside:avoid}
+  section{break-inside:avoid}
+  section.card:last-of-type{break-before:page}
+  .facts{margin-top:16px}
+  svg.anim .bar,svg.animx .bar{animation:none!important}
+  .printdate{display:block}
+  footer{margin:18px 0 0}
+}
 </style>
 </head>
 <body>
@@ -120,6 +151,7 @@ footer p{margin:0 0 6px}
     <div class="ctl"><span>Transaction currency</span><div class="seg" id="c-cur" role="group" aria-label="Transaction currency"></div></div>
     <div class="ctl"><span>Show amounts in</span><div class="seg" id="c-unit" role="group" aria-label="Amount unit"></div></div>
     <div class="chips" id="chips"></div>
+    <div class="actions"><button type="button" class="printbtn alt" id="xlsx">Export to Excel</button><button type="button" class="printbtn" id="print">Save as PDF</button></div>
   </div>
 </div>
 
@@ -166,6 +198,7 @@ footer p{margin:0 0 6px}
   </section>
 
   <footer>
+    <p class="printdate" id="pdate"></p>
     <p>Source: Extract sheet of the allocation progress report, <span id="n-lines"></span> ledger lines. The trailing Total row is excluded.</p>
     <p>Amounts are the debit side, as in the report's pivot tables, so the credit side does not cancel them out. With marker A selected, totals tie to the Per Main Account, Per Allocation Period and Per FY sheets. PHP is the base amount; USD is the reporting amount.</p>
     <p>Markers are shown as coded in the ledger extract. The report's Summary sheet notes that a percentage for open items is still to be added; it is not in the source data, so it is not shown here.</p>
@@ -277,6 +310,8 @@ function renderHead(){
   bits.push(state.marker==='all'?'all markers':'marker '+state.marker);
   bits.push(state.fy==='all'?'allocation FY2025 and FY2026':'allocation FY'+state.fy);
   if(state.cur!=='all') bits.push(state.cur+' transactions');
+  if(state.main) bits.push('account '+state.main+' only');
+  if(state.period) bits.push('period '+state.period+' only');
   document.getElementById('scope').textContent='Showing '+bits.join(', ')+'. Debit side, '+(state.unit==='PHP'?'PHP base amount':'USD reporting amount')+'.';
 }
 function wMedianLag(rows){
@@ -484,6 +519,140 @@ function render(){
 }
 document.getElementById('n-lines').textContent=int(D.lines);
 document.getElementById('q').addEventListener('input',e=>{state.q=e.target.value.trim().toLowerCase();state.showAll=false;tableAcct();});
+
+/* ---------- Excel export (minimal .xlsx writer, no dependencies) ---------- */
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+function crc32(u){let c=0xFFFFFFFF;for(let i=0;i<u.length;i++)c=CRC[(c^u[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;}
+function zipStore(files){
+  const enc=new TextEncoder(),parts=[],cen=[];let off=0,cdSize=0;
+  files.forEach(f=>{
+    const nm=enc.encode(f.name),data=enc.encode(f.text),crc=crc32(data),sz=data.length;
+    const lh=new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true);lh.setUint16(4,20,true);lh.setUint16(6,0x0800,true);lh.setUint16(8,0,true);lh.setUint16(10,0,true);lh.setUint16(12,0x21,true);
+    lh.setUint32(14,crc,true);lh.setUint32(18,sz,true);lh.setUint32(22,sz,true);lh.setUint16(26,nm.length,true);lh.setUint16(28,0,true);
+    parts.push(new Uint8Array(lh.buffer),nm,data);
+    const ch=new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true);ch.setUint16(4,20,true);ch.setUint16(6,20,true);ch.setUint16(8,0x0800,true);ch.setUint16(10,0,true);ch.setUint16(12,0,true);ch.setUint16(14,0x21,true);
+    ch.setUint32(16,crc,true);ch.setUint32(20,sz,true);ch.setUint32(24,sz,true);ch.setUint16(28,nm.length,true);ch.setUint32(42,off,true);
+    cen.push(new Uint8Array(ch.buffer),nm);cdSize+=46+nm.length;off+=30+nm.length+sz;
+  });
+  const e=new DataView(new ArrayBuffer(22));
+  e.setUint32(0,0x06054b50,true);e.setUint16(8,files.length,true);e.setUint16(10,files.length,true);e.setUint32(12,cdSize,true);e.setUint32(16,off,true);
+  return new Blob([...parts,...cen,new Uint8Array(e.buffer)],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+const xe=s=>String(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const colL=i=>{let s='';i++;while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26);}return s;};
+function sheetXml(rows,widths,freeze){
+  let x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+  x+='<sheetViews><sheetView workbookViewId="0" showGridLines="0">'+(freeze?'<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>':'')+'</sheetView></sheetViews>';
+  if(widths) x+='<cols>'+widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')+'</cols>';
+  x+='<sheetData>';
+  rows.forEach((row,ri)=>{
+    x+=`<row r="${ri+1}">`;
+    row.forEach((c,ci)=>{
+      if(c===null||c===undefined||c==='') return;
+      const o=(typeof c==='object')?c:{v:c,s:0}, ref=colL(ci)+(ri+1);
+      if(typeof o.v==='number') x+=`<c r="${ref}" s="${o.s||0}"><v>${o.v}</v></c>`;
+      else x+=`<c r="${ref}" s="${o.s||0}" t="inlineStr"><is><t xml:space="preserve">${xe(o.v)}</t></is></c>`;
+    });
+    x+='</row>';
+  });
+  return x+'</sheetData></worksheet>';
+}
+function exportXlsx(){
+  const H=v=>({v,s:1}), T=v=>({v,s:5}), N=n=>({v:Math.round(n*100)/100,s:2}), I=n=>({v:n,s:3}), P=n=>({v:n,s:4});
+  const sb=rs=>rs.reduce((s,r)=>s+r.base,0), sr=rs=>rs.reduce((s,r)=>s+r.rep,0), ln=rs=>rs.reduce((s,r)=>s+r.n,0);
+  const sh=(x,t)=>t?x/t:0;
+  const rows=sel(), totB=sb(rows), totR=sr(rows);
+  const sheets=[];
+  // Summary
+  const mset=new Set(rows.filter(r=>r.base!==0).map(r=>mainKey(r.m)));
+  const same=sb(rows.filter(r=>r.lag===0)), older=sb(rows.filter(r=>r.fyP<r.fyA));
+  const sum_=[
+    [T('Balance Sheet Clean Up Progress Report')],
+    ['Exported '+new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})+'. Debit-side amounts, as in the source report pivots.'],
+    [],
+    [H('Filters applied')],
+    ['Allocation marker',state.marker==='all'?'All':state.marker],
+    ['Allocation FY',state.fy==='all'?'Both':state.fy],
+    ['Transaction currency',state.cur==='all'?'Both':state.cur],
+    ['Main account',state.main||'All'],
+    ['Allocation period',state.period||'All'],
+    [],
+    [H('Key figures'),H('Value')],
+    ['Allocated (PHP base amount)',N(totB)],
+    ['Allocated (USD reporting amount)',N(totR)],
+    ['Debit lines',I(ln(rows))],
+    ['Main accounts',I(mset.size)],
+    ['Share allocated in the period it was posted',P(sh(same,totB))],
+    ['Share posted in an earlier fiscal year',P(sh(older,totB))],
+    ['Typical wait by amount (periods)',I(rows.length?wMedianLag(rows):0)],
+    [],
+    ['Note: the period selection does not apply to the Accounts sheet. Marker meanings are as coded in the ledger extract.']
+  ];
+  sheets.push(['Summary',sheetXml(sum_,[44,22],false)]);
+  // By period
+  const r2=sel(['period']), by2=new Map();
+  r2.forEach(r=>{const o=by2.get(r.lp)||[0,0,0];o[0]+=r.base;o[1]+=r.rep;o[2]+=r.n;by2.set(r.lp,o);});
+  const t2=sb(r2);
+  const p_=[[H('Allocation period'),H('Amount (PHP)'),H('Amount (USD)'),H('Debit lines'),H('Share of total')]];
+  allLp.filter(p=>state.fy==='all'||p.startsWith(state.fy)).forEach(p=>{const o=by2.get(p)||[0,0,0];p_.push([p,N(o[0]),N(o[1]),I(o[2]),P(sh(o[0],t2))]);});
+  sheets.push(['By period',sheetXml(p_,[20,20,20,14,16],true)]);
+  // By main account
+  const r3=sel(['main']), by3=new Map();
+  r3.forEach(r=>{const k=mainKey(r.m);const o=by3.get(k)||[0,0,0];o[0]+=r.base;o[1]+=r.rep;o[2]+=r.n;by3.set(k,o);});
+  const t3=sb(r3);
+  const m_=[[H('Main account'),H('Amount (PHP)'),H('Amount (USD)'),H('Debit lines'),H('Share of total')]];
+  [...by3.entries()].filter(e=>Math.abs(e[1][0])>=0.005).sort((a,b)=>b[1][0]-a[1][0]).forEach(([k,o])=>m_.push([k,N(o[0]),N(o[1]),I(o[2]),P(sh(o[0],t3))]));
+  m_.push([]);m_.push(['240-* groups all main accounts starting with 240-']);
+  sheets.push(['By main account',sheetXml(m_,[20,20,20,14,16],true)]);
+  // Posting FY
+  const cats=[['2020 and earlier',y=>y<=2020],['2021',y=>y===2021],['2022',y=>y===2022],['2023',y=>y===2023],['2024',y=>y===2024],['2025',y=>y===2025],['2026',y=>y===2026]];
+  const f_=[[H('Fiscal year of posting'),...fyAs.map(a=>H('Allocated in FY'+a+' (PHP)')),H('Total (PHP)'),H('Total (USD)')]];
+  cats.forEach(([l,f])=>{const rs=rows.filter(r=>f(r.fyP));f_.push([l,...fyAs.map(a=>N(sb(rs.filter(r=>r.fyA===a)))),N(sb(rs)),N(sr(rs))]);});
+  sheets.push(['By posting FY',sheetXml(f_,[24,...fyAs.map(()=>26),18,18],true)]);
+  // Timing
+  const bk=[['Same period',l=>l<=0],['1 period later',l=>l===1],['2-3 periods later',l=>l>=2&&l<=3],['4-6 periods later',l=>l>=4&&l<=6],['7-12 periods later',l=>l>=7&&l<=12],['More than 12 periods later',l=>l>12]];
+  const l_=[[H('Gap between posting and allocation'),H('Amount (PHP)'),H('Amount (USD)'),H('Share of total')]];
+  bk.forEach(([l,f])=>{const rs=rows.filter(r=>f(r.lag));l_.push([l,N(sb(rs)),N(sr(rs)),P(sh(sb(rs),totB))]);});
+  sheets.push(['Allocation timing',sheetXml(l_,[36,20,20,16],true)]);
+  // Markers
+  const r5=sel(['marker']);
+  const k_=[[H('Allocation marker'),H('Debit lines'),H('Amount (PHP)'),H('Amount (USD)')]];
+  D.markers.forEach(k=>{const rs=r5.filter(r=>r.k===k);k_.push([k,I(ln(rs)),N(sb(rs)),N(sr(rs))]);});
+  sheets.push(['By marker',sheetXml(k_,[20,14,20,20],true)]);
+  // Accounts (all)
+  const by6=new Map();
+  acc.forEach(r=>{
+    if(state.marker!=='all'&&r.k!==state.marker) return;
+    if(state.fy!=='all'&&r.fyA!==+state.fy) return;
+    if(state.cur!=='all'&&r.cur!==state.cur) return;
+    if(state.main&&mainKey(r.m)!==state.main) return;
+    const o=by6.get(r.a)||{a:r.a,m:r.m,b:0,u:0,n:0};o.b+=r.base;o.u+=r.rep;o.n+=r.n;by6.set(r.a,o);
+  });
+  const a_=[[H('Account code'),H('Main account'),H('Debit lines'),H('Amount (PHP)'),H('Amount (USD)')]];
+  [...by6.values()].filter(o=>Math.abs(o.b)>=0.005).sort((a,b)=>b.b-a.b).forEach(o=>a_.push([o.a,o.m,I(o.n),N(o.b),N(o.u)]));
+  sheets.push(['Accounts',sheetXml(a_,[22,16,14,20,20],true)]);
+
+  const styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="3"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font><font><b/><sz val="14"/><name val="Arial"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="medium"><color rgb="FFFF5515"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1"/><xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="10" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+  const files=[
+    {name:'[Content_Types].xml',text:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheets.map((s,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')+'</Types>'},
+    {name:'_rels/.rels',text:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+    {name:'xl/workbook.xml',text:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheets.map((s,i)=>`<sheet name="${xe(s[0])}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')+'</sheets></workbook>'},
+    {name:'xl/_rels/workbook.xml.rels',text:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map((s,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')+`<Relationship Id="rId${sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
+    {name:'xl/styles.xml',text:styles},
+    ...sheets.map((s,i)=>({name:`xl/worksheets/sheet${i+1}.xml`,text:s[1]}))
+  ];
+  const blob=zipStore(files), a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download='Balance_Sheet_Clean_Up_Progress_Report.xlsx';
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+}
+const redraw=()=>{chartPeriod();chartMain();chartFY();chartLag();spark();};
+document.getElementById('pdate').textContent='Printed '+new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});
+document.getElementById('xlsx').onclick=exportXlsx;
+document.getElementById('print').onclick=()=>window.print();
+window.addEventListener('beforeprint',()=>setTimeout(redraw,0));
+window.addEventListener('afterprint',()=>setTimeout(redraw,0));
 let rt; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(()=>{chartPeriod();chartMain();chartFY();chartLag();spark();},120);});
 render();
 first=false;
